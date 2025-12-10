@@ -1,8 +1,12 @@
-/* q2.c - simple REPL without exit / Ctrl+D handling (Q2)
-   Ctrl+D is ignored (we clear EOF and continue), 'exit' is not handled here.
+/* q2.c - simple REPL (Q2) utilisé aussi par Q3
+   - commande "yoo" -> "salut"
+   - commande "date" -> date précise
+   - exécution de commandes simples
+   - PAS de exit/Ctrl+D ici (géré dans Q3)
 */
 
 #define _POSIX_C_SOURCE 200809L
+
 #include "q2.h"
 #include <stdio.h>
 #include <string.h>
@@ -13,82 +17,106 @@
 
 static const char *PROMPT = "enseash % ";
 
-/* write whole string, handle EINTR */
+/* write complet et sûr */
 static void safe_write(const char *s) {
     size_t len = strlen(s);
     const char *p = s;
+
     while (len > 0) {
         ssize_t w = write(STDOUT_FILENO, p, len);
         if (w < 0) {
             if (errno == EINTR) continue;
-            break;
+            return;
         }
         p += w;
         len -= (size_t)w;
     }
 }
 
+/* Exécution d'une commande simple */
+static void exec_command(const char *cmd) {
+    pid_t pid = fork();
+    if (pid < 0) {
+        perror("fork");
+        return;
+    }
+    if (pid == 0) {
+        execlp(cmd, cmd, (char *)NULL);
+
+        /* si exec échoue */
+        char err[256];
+        int n = snprintf(err, sizeof(err),
+                         "enseash: failed to exec '%s': %s\n",
+                         cmd, strerror(errno));
+
+        if (n > 0) {
+            ssize_t __w = write(STDERR_FILENO, err,
+                                (size_t)(n < (int)sizeof(err) ? n : (int)sizeof(err)));
+            (void)__w;
+        }
+        _exit(127);
+    } else {
+        waitpid(pid, NULL, 0);
+    }
+}
+
+/* Fonction principale Q2 (appelée par Q3 ensuite) */
+int q2_execute_line(const char *line) {
+    if (line[0] == '\0')
+        return 0;  // retourner un int
+
+    /* builtin : yoo */
+    if (strcmp(line, "yoo") == 0) {
+        safe_write("salut\n");
+        return 0;
+    }
+
+    /* builtin : date */
+    if (strcmp(line, "date") == 0) {
+        pid_t pid = fork();
+        if (pid < 0) {
+            perror("fork");
+            return 1;
+        }
+        if (pid == 0) {
+            execlp("date", "date", "+%Y-%m-%d %H:%M:%S.%N", (char *)NULL);
+
+            char err[256];
+            int n = snprintf(err, sizeof(err),
+                             "enseash: failed to exec date: %s\n",
+                             strerror(errno));
+
+            if (n > 0) {
+                ssize_t __w = write(STDERR_FILENO, err,
+                                    (size_t)(n < (int)sizeof(err) ? n : (int)sizeof(err)));
+                (void)__w;
+            }
+            _exit(127);
+        }
+        waitpid(pid, NULL, 0);
+        return 0;
+    }
+
+    /* sinon exécuter commande */
+    exec_command(line);
+    return 0;
+}
+
+/* Q2 REPL minimal (appelé seulement si tu veux, sinon Q3 remplace) */
 void q2_run_repl(void) {
     char line[1024];
 
     while (1) {
         safe_write(PROMPT);
 
-        /* fgets returns NULL on EOF or error.
-           Instead of exiting on EOF, clear EOF and continue so the prompt stays active.
-           This allows adding exit handling later in Q3. */
         if (fgets(line, sizeof(line), stdin) == NULL) {
-            /* print a newline to keep the prompt tidy, clear EOF state and continue */
             safe_write("\n");
-            clearerr(stdin); /* remove EOF so next fgets will block for new input */
+            clearerr(stdin);
             continue;
         }
 
-        /* remove trailing newline */
         line[strcspn(line, "\n")] = '\0';
-
-        if (line[0] == '\0') continue;
-
-        /* builtin simple : "yoo" -> salut */
-        if (strcmp(line, "yoo") == 0) {
-            safe_write("salut\n");
-            continue;
-        }
-
-        /* special case: date -> precise format */
-        if (strcmp(line, "date") == 0) {
-            pid_t pid = fork();
-            if (pid < 0) { perror("fork"); continue; }
-            if (pid == 0) {
-                execlp("date", "date", "+%Y-%m-%d %H:%M:%S.%N", (char *)NULL);
-                /* if exec fails */
-                char err[512];
-                int n = snprintf(err, sizeof(err), "enseash: failed to exec date: %s\n", strerror(errno));
-                if (n > 0) write(STDERR_FILENO, err, (size_t) (n < (int)sizeof(err) ? n : (int)sizeof(err)));
-                _exit(127);
-            } else {
-                int status; waitpid(pid, &status, 0);
-                continue;
-            }
-        }
-
-        /* otherwise try to execute the single-word command (no args) */
-        pid_t pid = fork();
-        if (pid < 0) { perror("fork"); continue; }
-        if (pid == 0) {
-            execlp(line, line, (char *)NULL);
-            /* build error message in a bigger buffer to avoid truncation warnings */
-            char err[512];
-            int n = snprintf(err, sizeof(err), "enseash: failed to exec '%s': %s\n",
-                             line, strerror(errno));
-            if (n > 0) write(STDERR_FILENO, err, (size_t) (n < (int)sizeof(err) ? n : (int)sizeof(err)));
-            _exit(127);
-        } else {
-            int status; waitpid(pid, &status, 0);
-            /* simple REPL: no exit code printed here */
-        }
+        q2_execute_line(line);
     }
-
-    /* unreachable, but keep function signature consistent */
 }
 

@@ -1,12 +1,7 @@
-#include "q1.h"
-#include "q2.h"
+#include "q3.h"
 
-
-
-int main() {
-    // Appel direct de la fonction Q1
-   // q1_print();
-    q2_run_repl();
-
+int main(void) {
+    q3_run_repl();
     return 0;
 }
+
