@@ -29,7 +29,7 @@ static void safe_write(const char *s) {
 }
 
 void q2_run_repl(void) {
-    char line[256];
+    char line[1024];
 
     while (1) {
         safe_write(PROMPT);
@@ -62,9 +62,9 @@ void q2_run_repl(void) {
             if (pid == 0) {
                 execlp("date", "date", "+%Y-%m-%d %H:%M:%S.%N", (char *)NULL);
                 /* if exec fails */
-                char err[128];
-                snprintf(err, sizeof(err), "enseash: failed to exec date: %s\n", strerror(errno));
-                write(STDERR_FILENO, err, strlen(err));
+                char err[512];
+                int n = snprintf(err, sizeof(err), "enseash: failed to exec date: %s\n", strerror(errno));
+                if (n > 0) write(STDERR_FILENO, err, (size_t) (n < (int)sizeof(err) ? n : (int)sizeof(err)));
                 _exit(127);
             } else {
                 int status; waitpid(pid, &status, 0);
@@ -77,9 +77,11 @@ void q2_run_repl(void) {
         if (pid < 0) { perror("fork"); continue; }
         if (pid == 0) {
             execlp(line, line, (char *)NULL);
-            char err[128];
-            snprintf(err, sizeof(err), "enseash: failed to exec '%s': %s\n", line, strerror(errno));
-            write(STDERR_FILENO, err, strlen(err));
+            /* build error message in a bigger buffer to avoid truncation warnings */
+            char err[512];
+            int n = snprintf(err, sizeof(err), "enseash: failed to exec '%s': %s\n",
+                             line, strerror(errno));
+            if (n > 0) write(STDERR_FILENO, err, (size_t) (n < (int)sizeof(err) ? n : (int)sizeof(err)));
             _exit(127);
         } else {
             int status; waitpid(pid, &status, 0);
