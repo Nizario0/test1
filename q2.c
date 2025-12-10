@@ -1,12 +1,4 @@
-/* q2.c - simple REPL (Q2) utilisé aussi par Q3
-   - commande "yoo" -> "salut"
-   - commande "date" -> date précise
-   - exécution de commandes simples
-   - PAS de exit/Ctrl+D ici (géré dans Q3)
-*/
-
 #define _POSIX_C_SOURCE 200809L
-
 #include "q2.h"
 #include <stdio.h>
 #include <string.h>
@@ -15,108 +7,81 @@
 #include <errno.h>
 #include <stdlib.h>
 
-static const char *PROMPT = "enseash % ";
-
-/* write complet et sûr */
+/* safe write */
 static void safe_write(const char *s) {
     size_t len = strlen(s);
     const char *p = s;
-
     while (len > 0) {
         ssize_t w = write(STDOUT_FILENO, p, len);
-        if (w < 0) {
-            if (errno == EINTR) continue;
-            return;
-        }
+        if (w < 0) { if (errno == EINTR) continue; return; }
         p += w;
         len -= (size_t)w;
     }
 }
 
-/* Exécution d'une commande simple */
-static void exec_command(const char *cmd) {
+/* exécution d’une commande externe */
+static int exec_command(const char *cmd, int *status) {
     pid_t pid = fork();
-    if (pid < 0) {
-        perror("fork");
-        return;
-    }
+    if (pid < 0) { perror("fork"); if (status) *status = 1; return -1; }
     if (pid == 0) {
-        execlp(cmd, cmd, (char *)NULL);
-
-        /* si exec échoue */
+        execlp(cmd, cmd, NULL);
         char err[256];
         int n = snprintf(err, sizeof(err),
                          "enseash: failed to exec '%s': %s\n",
                          cmd, strerror(errno));
-
-        if (n > 0) {
-            ssize_t __w = write(STDERR_FILENO, err,
-                                (size_t)(n < (int)sizeof(err) ? n : (int)sizeof(err)));
-            (void)__w;
-        }
+        if (n > 0) (void)write(STDERR_FILENO, err, (size_t)(n < (int)sizeof(err) ? n : (int)sizeof(err)));
         _exit(127);
     } else {
-        waitpid(pid, NULL, 0);
+        int wstatus;
+        waitpid(pid, &wstatus, 0);
+        if (status) *status = wstatus;
     }
-}
-
-/* Fonction principale Q2 (appelée par Q3 ensuite) */
-int q2_execute_line(const char *line) {
-    if (line[0] == '\0')
-        return 0;  // retourner un int
-
-    /* builtin : yoo */
-    if (strcmp(line, "yoo") == 0) {
-        safe_write("salut\n");
-        return 0;
-    }
-
-    /* builtin : date */
-    if (strcmp(line, "date") == 0) {
-        pid_t pid = fork();
-        if (pid < 0) {
-            perror("fork");
-            return 1;
-        }
-        if (pid == 0) {
-            execlp("date", "date", "+%Y-%m-%d %H:%M:%S.%N", (char *)NULL);
-
-            char err[256];
-            int n = snprintf(err, sizeof(err),
-                             "enseash: failed to exec date: %s\n",
-                             strerror(errno));
-
-            if (n > 0) {
-                ssize_t __w = write(STDERR_FILENO, err,
-                                    (size_t)(n < (int)sizeof(err) ? n : (int)sizeof(err)));
-                (void)__w;
-            }
-            _exit(127);
-        }
-        waitpid(pid, NULL, 0);
-        return 0;
-    }
-
-    /* sinon exécuter commande */
-    exec_command(line);
     return 0;
 }
 
-/* Q2 REPL minimal (appelé seulement si tu veux, sinon Q3 remplace) */
+int q2_execute_line(const char *line, int *status) {
+    if (line[0] == '\0') return 0;
+
+    /* builtin "yoo" */
+    if (strcmp(line, "yoo") == 0) {
+        safe_write("salut\n");
+        if (status) *status = 0;
+        return 0;
+    }
+
+    /* builtin "date" */
+    if (strcmp(line, "date") == 0) {
+        pid_t pid = fork();
+        if (pid < 0) { perror("fork"); if(status) *status = 1; return 1; }
+        if (pid == 0) {
+            execlp("date","date","+%Y-%m-%d %H:%M:%S.%N",NULL);
+            _exit(127);
+        } else {
+            int wstatus;
+            waitpid(pid, &wstatus, 0);
+            if (status) *status = wstatus;
+            return 0;
+        }
+    }
+
+    /* autres commandes */
+    exec_command(line, status);
+    return 0;
+}
+
+/* REPL minimal Q2 */
 void q2_run_repl(void) {
     char line[1024];
-
+    int status = 0;
     while (1) {
-        safe_write(PROMPT);
-
+        (void)write(STDOUT_FILENO, "enseash % ", 10);
         if (fgets(line, sizeof(line), stdin) == NULL) {
             safe_write("\n");
             clearerr(stdin);
             continue;
         }
-
         line[strcspn(line, "\n")] = '\0';
-        q2_execute_line(line);
+        q2_execute_line(line, &status);
     }
 }
 
